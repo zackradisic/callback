@@ -1,0 +1,16 @@
+{
+  "name": "callback",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Missed-call text-back + AI qualification for home-service businesses",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "twilio": "^5.3.0"
+  }
+}

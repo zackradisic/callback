@@ -28,8 +28,20 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const twilioClient =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+const MOCK = process.env.MOCK_TWILIO === "1";
+
+const mockClient = {
+  messages: {
+    create: async ({ to, body }) => {
+      console.log(`[sms -> ${to}] ${body}`);
+      return { sid: "SM_mock" };
+    },
+  },
+};
+
+const twilioClient = MOCK
+  ? mockClient
+  : TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     : null;
 
@@ -46,6 +58,14 @@ async function aiReply(phone, incoming) {
   const history = conversations.get(phone) ?? [];
   history.push({ role: "user", content: incoming });
   conversations.set(phone, history);
+
+  // No key, or demo mode: use the scripted qualifier and spend nothing.
+  if (!OPENAI_API_KEY || process.env.MOCK_AI === "1") {
+    const reply = scriptedReply(history);
+    history.push({ role: "assistant", content: reply });
+    conversations.set(phone, history);
+    return reply;
+  }
 
   const system = `You are the after-hours assistant for ${BUSINESS_NAME}, a home-service business.
 A customer called and we missed it; you texted them first. Your job: be warm, brief, and get the job booked.
@@ -83,6 +103,33 @@ Rules:
   return reply;
 }
 
+// ---- deterministic qualifier ----
+// Fallback that runs with zero API spend and zero latency. It is not a toy: this
+// is the flow that answers when the model is down, rate-limited, or out of credit.
+// Ask one question, get problem + urgency + zip, hand over the booking link.
+const EMERGENCY = /\b(gas|smell|sparking|sparks?|smoke|fire|flood(ing)?|burst|no heat|freezing|sewage|overflow)\b/i;
+
+function scriptedReply(history) {
+  const turns = history.filter((m) => m.role === "user").map((m) => m.content);
+  const last = turns.at(-1) ?? "";
+  const n = turns.length;
+
+  if (/\b(booked|confirmed|see you|sounds good|perfect|thanks|thank you|will do|ok(ay)?)\b/i.test(last) && n > 2) {
+    return `You're all set. We'll text before we head over. If anything changes, just reply here.`;
+  }
+  if (EMERGENCY.test(last)) {
+    return `That sounds urgent. Shut off the water/gas or kill the breaker if you can safely, and if it's dangerous call 911. ` +
+      `I'm booking you now: ${BOOKING_URL} — reply with your address or zip so I can put it on the job.`;
+  }
+  if (n <= 1) {
+    return `Got it — what's the address or zip, and is it an emergency or can it wait until today?`;
+  }
+  if (n === 2) {
+    return `Perfect. Grab a slot here: ${BOOKING_URL} — if none work, reply with a time and I'll fit you in.`;
+  }
+  return `Thanks — you're on the list for ${BOOKING_URL}. We'll text you a reminder before we head over.`;
+}
+
 // ---- 1. Twilio voice status callback: fires when a call ends ----
 app.post("/voice/status", async (req, res) => {
   res.sendStatus(200); // Twilio wants a fast ack
@@ -115,8 +162,11 @@ app.post("/sms/inbound", async (req, res) => {
   try {
     reply = await aiReply(from, body);
   } catch (err) {
-    console.error("[ai] fallback:", err.message);
-    reply = `Got it — thanks. Someone from ${BUSINESS_NAME} will text you shortly. If this is an emergency, call 911.`;
+    console.error("[ai] falling back to scripted qualifier:", err.message);
+    const hist = conversations.get(from) ?? [{ role: "user", content: body }];
+    reply = scriptedReply(hist);
+    hist.push({ role: "assistant", content: reply });
+    conversations.set(from, hist);
   }
 
   logLead({ phone: from, message: body, reply, stage: "conversation" });

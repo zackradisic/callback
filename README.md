@@ -16,9 +16,24 @@ the caller gets a text in ~8 seconds → the AI qualifies the job → a booked s
 |---|---|
 | `index.html` | Landing page + interactive demo + ROI calculator. Deploy anywhere static. |
 | `server.js` | Twilio voice-status webhook → SMS, inbound SMS → AI qualification. |
+| `demo.mjs` | Runs the whole flow end-to-end offline. `node demo.mjs`. |
+| `MONEY.md` | The plan, the unit economics, the first 90 days. |
 | `.env.example` | Config. |
 
-## Run it locally
+## See it work (no keys, no network)
+
+```bash
+node demo.mjs
+```
+
+Runs a simulated ring-out on a fake plumbing line, the 8-second text-back, and a full
+qualification conversation. Same handlers as production; only the Twilio client is mocked.
+
+> **Before your first customer:** register a US A2P 10DLC campaign in Twilio. Carriers
+> will silently drop unregistered business SMS. It takes a few days and ~$4/mo.
+> Use the shop's trade name in the message, never "AI assistant".
+
+## Run it for real
 
 ```bash
 cd callback
